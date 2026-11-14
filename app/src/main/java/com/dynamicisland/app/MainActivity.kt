@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import android.widget.Button
 import android.widget.SeekBar
@@ -28,12 +27,12 @@ class MainActivity : AppCompatActivity() {
         private const val VIDEO_URL =
             "https://github.com/Bobdfog34/dynamic-island/releases/latest/download/instruction.mp4"
         private const val CHANGELOG =
-            "Что нового в 3.0:\n" +
-                    "• Блокировка уведомлений: они приходят только в остров\n" +
-                    "• Список приложений-исключений (важные не блокируются)\n" +
-                    "• Музыка: обложка, прогресс и кнопки управления\n" +
-                    "• Стеклянный «sheen», мягкие анимации и подсветка\n" +
-                    "• Имя приложения в уведомлениях"
+            "Что нового в 3.1:\n" +
+                    "• Уведомления группируются: 35 сообщений — один блок со списком\n" +
+                    "• Исправлена загрузка обновлений прямо в приложении\n" +
+                    "• Блокировка уведомлений: приходят только в остров\n" +
+                    "• Список приложений-исключений\n" +
+                    "• Музыка: обложка, прогресс и кнопки управления"
     }
 
     private lateinit var prefs: Prefs
@@ -148,7 +147,7 @@ class MainActivity : AppCompatActivity() {
 
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
         ContextCompat.registerReceiver(
-            this, downloadReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+            this, downloadReceiver, filter, ContextCompat.RECEIVER_EXPORTED
         )
 
         requestNotifPermission()
@@ -220,25 +219,39 @@ class MainActivity : AppCompatActivity() {
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
                 )
                 .setMimeType("application/vnd.android.package-archive")
-                .setDestinationInExternalFilesDir(
-                    this,
-                    Environment.DIRECTORY_DOWNLOADS,
-                    "DynamicIsland-${System.currentTimeMillis()}.apk"
-                )
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             pendingDownloadId = dm.enqueue(request)
+            latestApkUrl = url
             tvUpdateStatus.text = "Загрузка обновления…"
             toast("Загрузка началась")
         } catch (e: Exception) {
+            toast("Не удалось запустить загрузку, открываю в браузере")
             openUrl(url)
         }
     }
 
     private fun installApk(id: Long) {
         val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = dm.query(DownloadManager.Query().setFilterById(id))
+        val status = if (cursor != null && cursor.moveToFirst()) {
+            cursor.getInt(cursor.getColumnIndex(DownloadManager.COLUMN_STATUS))
+        } else {
+            -1
+        }
+        cursor?.close()
+
+        if (status != DownloadManager.STATUS_SUCCESSFUL) {
+            toast("Загрузка не удалась, открываю в браузере")
+            latestApkUrl?.let { openUrl(it) }
+            return
+        }
+
         val uri = dm.getUriForDownloadedFile(id)
         if (uri == null) {
             toast("Не удалось открыть файл обновления")
+            latestApkUrl?.let { openUrl(it) }
             return
         }
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -247,6 +260,7 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             startActivity(intent)
+            tvUpdateStatus.text = "Установите обновление из открывшегося окна"
         } catch (e: Exception) {
             toast("Откройте скачанный файл вручную")
         }

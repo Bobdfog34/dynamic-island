@@ -42,6 +42,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         const val MEDIA_PREV = 0
         const val MEDIA_PLAY_PAUSE = 1
         const val MEDIA_NEXT = 2
+        const val MAX_LINES = 5
     }
 
     var listener: Listener? = null
@@ -69,6 +70,8 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val titleView = TextView(context)
     private val subtitleView = TextView(context)
     private val progressLine = ProgressLineView(context)
+    private val linesBox = LinearLayout(context)
+    private val lineViews = ArrayList<TextView>()
 
     private val rightContainer = FrameLayout(context)
     private val equalizer = EqualizerView(context)
@@ -171,6 +174,25 @@ class IslandView(context: Context) : FrameLayout(context) {
         progressLine.layoutParams = progLp
         progressLine.visibility = View.GONE
         textBox.addView(progressLine)
+
+        linesBox.orientation = LinearLayout.VERTICAL
+        linesBox.visibility = View.GONE
+        linesBox.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        for (i in 0 until MAX_LINES) {
+            val tv = TextView(context)
+            tv.setTextColor(Color.parseColor("#E6FFFFFF"))
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            tv.maxLines = 1
+            tv.ellipsize = android.text.TextUtils.TruncateAt.END
+            tv.setPadding(0, dp(1), 0, dp(1))
+            tv.visibility = View.GONE
+            linesBox.addView(tv)
+            lineViews.add(tv)
+        }
+        textBox.addView(linesBox)
+
         textBox.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         contentRow.addView(textBox)
 
@@ -347,6 +369,29 @@ class IslandView(context: Context) : FrameLayout(context) {
         }
     }
 
+    fun showNotification(content: IslandContent) {
+        val cur = current
+        val sameKey = cur != null &&
+                cur.type == IslandContent.Type.NOTIFICATION &&
+                cur.key == content.key
+        if (sameKey) {
+            current = content
+            updateContentOnly(content)
+            applyRightWidget(content)
+            if (state == State.EXPANDED) {
+                setState(State.EXPANDED)
+            } else {
+                setState(State.COMPACT)
+            }
+            handler.removeCallbacks(collapseRunnable)
+            if (prefs.autoCollapseMs > 0) {
+                handler.postDelayed(collapseRunnable, prefs.autoCollapseMs.toLong())
+            }
+            return
+        }
+        enqueue(content)
+    }
+
     fun enqueue(content: IslandContent) {
         if (state == State.EXPANDED || (current != null && !isPersistent(current))) {
             queue.addLast(content)
@@ -425,6 +470,15 @@ class IslandView(context: Context) : FrameLayout(context) {
         playBtn.setImageResource(
             if (content.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
         )
+        for (i in lineViews.indices) {
+            val tv = lineViews[i]
+            if (content.type == IslandContent.Type.NOTIFICATION && i < content.lines.size) {
+                tv.text = "•  " + content.lines[i]
+                tv.visibility = View.VISIBLE
+            } else {
+                tv.visibility = View.GONE
+            }
+        }
     }
 
     private fun applyContent(content: IslandContent) {
@@ -508,6 +562,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                     ) View.VISIBLE else View.GONE
                 textBox.visibility = View.VISIBLE
                 subtitleView.visibility = View.VISIBLE
+                linesBox.visibility = View.GONE
                 controls.visibility = View.GONE
                 progressLine.visibility = View.GONE
                 rightContainer.visibility =
@@ -527,6 +582,10 @@ class IslandView(context: Context) : FrameLayout(context) {
                 textBox.visibility = View.VISIBLE
                 subtitleView.visibility = View.VISIBLE
                 val music = type == IslandContent.Type.MUSIC
+                val shownLines = if (type == IslandContent.Type.NOTIFICATION) {
+                    min(current?.lines?.size ?: 0, MAX_LINES)
+                } else 0
+                linesBox.visibility = if (shownLines > 0) View.VISIBLE else View.GONE
                 controls.visibility = if (music) View.VISIBLE else View.GONE
                 progressLine.visibility =
                     if (music && (current?.progressFraction() ?: -1f) >= 0f) View.VISIBLE else View.GONE
@@ -536,7 +595,11 @@ class IslandView(context: Context) : FrameLayout(context) {
                         type == IslandContent.Type.BATTERY_LOW
                     ) View.VISIBLE else View.GONE
                 val w = min((screenWidth - dp(24)), dp(408))
-                val h = if (music) dp(104) else dp(92)
+                val h = when {
+                    music -> dp(104)
+                    shownLines > 0 -> dp(48 + shownLines * 20)
+                    else -> dp(92)
+                }
                 animateTo(w, h, idle = false)
                 subtitleView.alpha = 0f
                 subtitleView.animate().alpha(1f).setDuration(220).start()

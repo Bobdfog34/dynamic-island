@@ -51,6 +51,15 @@ class IslandOverlayService : Service(), IslandView.Listener {
     private var lastCharging = false
     private var lastBatteryLevel = -1
 
+    private class Agg(
+        val pkg: String,
+        var appLabel: String,
+        var icon: Drawable?,
+        val lines: LinkedHashMap<String, String>
+    )
+
+    private val aggregates = LinkedHashMap<String, Agg>()
+
     private var timerEnd = 0L
     private val timerRunnable = object : Runnable {
         override fun run() {
@@ -273,7 +282,8 @@ class IslandOverlayService : Service(), IslandView.Listener {
                 val text = intent.getStringExtra("text") ?: ""
                 val pkg = intent.getStringExtra("pkg") ?: ""
                 val appLabel = intent.getStringExtra("appLabel") ?: ""
-                onNotificationReceived(title, text, pkg, appLabel)
+                val key = intent.getStringExtra("key") ?: ""
+                onNotificationReceived(title, text, pkg, appLabel, key)
             }
             "ACTION_START_TIMER" -> startTimer(intent.getIntExtra("minutes", 1))
             "ACTION_STOP_TIMER" -> stopTimer()
@@ -282,9 +292,16 @@ class IslandOverlayService : Service(), IslandView.Listener {
         return START_STICKY
     }
 
-    fun onNotificationReceived(title: String, text: String, pkg: String, appLabel: String = "") {
+    fun onNotificationReceived(
+        title: String,
+        text: String,
+        pkg: String,
+        appLabel: String = "",
+        key: String = ""
+    ) {
         if (!prefs.showNotifications) return
         if (title.isBlank() && text.isBlank()) return
+
         var icon: Drawable? = null
         if (pkg.isNotEmpty()) {
             try {
@@ -292,15 +309,47 @@ class IslandOverlayService : Service(), IslandView.Listener {
             } catch (_: Exception) {
             }
         }
-        val content = IslandContent(
+
+        val agg = aggregates.getOrPut(pkg) {
+            Agg(pkg, appLabel, icon, LinkedHashMap())
+        }
+        if (appLabel.isNotBlank()) agg.appLabel = appLabel
+        if (icon != null) agg.icon = icon
+
+        val line = when {
+            title.isNotBlank() && text.isNotBlank() -> "$title: $text"
+            title.isNotBlank() -> title
+            else -> text
+        }
+        val lineKey = key.ifBlank { line }
+        agg.lines[lineKey] = line
+        while (agg.lines.size > 30) {
+            val it = agg.lines.entries.iterator()
+            if (it.hasNext()) {
+                it.next()
+                it.remove()
+            }
+        }
+
+        handler.post { islandView.showNotification(buildNotifContent(agg)) }
+    }
+
+    private fun buildNotifContent(agg: Agg): IslandContent {
+        val all = agg.lines.values.toList()
+        val count = all.size
+        val recent = all.takeLast(5).reversed()
+        val subtitle = if (count > 1) "$count новых сообщений" else (all.lastOrNull() ?: "")
+        return IslandContent(
             IslandContent.Type.NOTIFICATION,
-            title.ifBlank { appLabel },
-            text,
-            icon = icon,
-            emoji = if (icon == null) "🔔" else "",
-            appLabel = appLabel
+            agg.appLabel.ifBlank { "Уведомления" },
+            subtitle,
+            icon = agg.icon,
+            emoji = if (agg.icon == null) "🔔" else "",
+            appLabel = agg.appLabel,
+            lines = recent,
+            key = agg.pkg,
+            count = count
         )
-        handler.post { islandView.show(content) }
     }
 
     fun onListenerReady() {
@@ -397,6 +446,7 @@ class IslandOverlayService : Service(), IslandView.Listener {
     }
 
     override fun onIdle() {
+        aggregates.clear()
         restoreDefault()
     }
 

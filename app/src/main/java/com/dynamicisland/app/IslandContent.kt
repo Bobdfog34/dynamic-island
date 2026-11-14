@@ -14,6 +14,9 @@ data class IslandContent(
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
+    val lines: List<String> = emptyList(),
+    val key: String = "",
+    val count: Int = 0,
     val timestamp: Long = System.currentTimeMillis()
 ) {
     enum class Type {
