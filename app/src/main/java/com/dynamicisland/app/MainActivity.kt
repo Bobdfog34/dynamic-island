@@ -1,11 +1,16 @@
 package com.dynamicisland.app
 
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.widget.Button
 import android.widget.SeekBar
@@ -18,11 +23,42 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val REPO = "Bobdfog34/dynamic-island"
+        private const val VIDEO_URL =
+            "https://github.com/Bobdfog34/dynamic-island/releases/latest/download/instruction.mp4"
+        private const val CHANGELOG =
+            "Что нового в 2.0:\n" +
+                    "• Уведомления показываются надёжно — с иконкой приложения и текстом\n" +
+                    "• Полностью новый дизайн: градиент, свечение, «дышащий» остров\n" +
+                    "• Живой эквалайзер для музыки и анимация зарядки\n" +
+                    "• Плавные пружинные анимации раскрытия\n" +
+                    "• Обновление прямо из приложения\n" +
+                    "• Видео-инструкция"
+    }
+
     private lateinit var prefs: Prefs
     private var updatingUi = false
 
     private lateinit var tvStatus: TextView
     private lateinit var swEnable: SwitchCompat
+    private lateinit var tvVersion: TextView
+    private lateinit var tvUpdateStatus: TextView
+    private lateinit var tvChangelog: TextView
+    private lateinit var btnDownloadUpdate: Button
+
+    private val updater = Updater(REPO)
+    private var latestApkUrl: String? = null
+    private var pendingDownloadId = -1L
+
+    private val downloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (id == pendingDownloadId) {
+                installApk(id)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,6 +67,10 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         swEnable = findViewById(R.id.swEnable)
+        tvVersion = findViewById(R.id.tvVersion)
+        tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
+        tvChangelog = findViewById(R.id.tvChangelog)
+        btnDownloadUpdate = findViewById(R.id.btnDownloadUpdate)
 
         findViewById<Button>(R.id.btnOverlay).setOnClickListener { requestOverlay() }
         findViewById<Button>(R.id.btnNotifAccess).setOnClickListener { openNotifAccess() }
@@ -46,6 +86,7 @@ class MainActivity : AppCompatActivity() {
         bindSwitch(R.id.swCharging) { prefs.showCharging = it }
         bindSwitch(R.id.swBoot) { prefs.startOnBoot = it }
         bindSwitch(R.id.swBorder) { prefs.borderEnabled = it; applyNow() }
+        bindSwitch(R.id.swGlow) { prefs.glowEnabled = it; applyNow() }
 
         setupSeek(
             R.id.sbWidth, R.id.tvWidth, prefs.collapsedWidth, 80, 220, "Ширина: %d dp"
@@ -72,13 +113,125 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnTimerStop).setOnClickListener { stopTimer() }
         findViewById<Button>(R.id.btnApply).setOnClickListener { applyNow(); toast("Настройки применены") }
 
+        findViewById<Button>(R.id.btnCheckUpdate).setOnClickListener { checkUpdates() }
+        findViewById<Button>(R.id.btnVideo).setOnClickListener { openUrl(VIDEO_URL) }
+        btnDownloadUpdate.setOnClickListener {
+            val url = latestApkUrl
+            if (url != null) downloadUpdate(url) else toast("Нет ссылки на обновление")
+        }
+
+        tvVersion.text = "Dynamic Island  v${versionName()}"
+        tvChangelog.text = CHANGELOG
+
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        ContextCompat.registerReceiver(
+            this, downloadReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+
         requestNotifPermission()
+        checkUpdates()
     }
 
     override fun onResume() {
         super.onResume()
         updateStatus()
         loadUiFromPrefs()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(downloadReceiver)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun versionName(): String {
+        return try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "?"
+        } catch (_: Exception) {
+            "?"
+        }
+    }
+
+    private fun checkUpdates() {
+        tvUpdateStatus.text = "Проверка обновлений…"
+        btnDownloadUpdate.visibility = Button.GONE
+        updater.check(versionName()) { info ->
+            if (info == null) {
+                tvUpdateStatus.text = "У вас последняя версия ✅"
+                tvChangelog.text = CHANGELOG
+            } else {
+                tvUpdateStatus.text = "Доступно обновление v${info.versionName}"
+                if (info.notes.isNotBlank()) {
+                    tvChangelog.text = "Что нового в ${info.versionName}:\n" + info.notes.trim()
+                }
+                latestApkUrl = info.apkUrl ?: info.pageUrl
+                btnDownloadUpdate.visibility = Button.VISIBLE
+            }
+        }
+    }
+
+    private fun downloadUpdate(url: String) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            toast("Разреши установку приложений из этого источника")
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            } catch (_: Exception) {
+            }
+            return
+        }
+        try {
+            val request = DownloadManager.Request(Uri.parse(url))
+                .setTitle("Dynamic Island")
+                .setDescription("Загрузка обновления…")
+                .setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                )
+                .setMimeType("application/vnd.android.package-archive")
+                .setDestinationInExternalFilesDir(
+                    this,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "DynamicIsland-${System.currentTimeMillis()}.apk"
+                )
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            pendingDownloadId = dm.enqueue(request)
+            tvUpdateStatus.text = "Загрузка обновления…"
+            toast("Загрузка началась")
+        } catch (e: Exception) {
+            openUrl(url)
+        }
+    }
+
+    private fun installApk(id: Long) {
+        val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val uri = dm.getUriForDownloadedFile(id)
+        if (uri == null) {
+            toast("Не удалось открыть файл обновления")
+            return
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(intent)
+        } catch (e: Exception) {
+            toast("Откройте скачанный файл вручную")
+        }
+    }
+
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: Exception) {
+            toast("Не удалось открыть ссылку")
+        }
     }
 
     private fun bindSwitch(id: Int, onChange: (Boolean) -> Unit) {
@@ -90,6 +243,7 @@ class MainActivity : AppCompatActivity() {
             R.id.swCharging -> prefs.showCharging
             R.id.swBoot -> prefs.startOnBoot
             R.id.swBorder -> prefs.borderEnabled
+            R.id.swGlow -> prefs.glowEnabled
             else -> false
         }
         sw.setOnCheckedChangeListener { _, checked -> onChange(checked) }

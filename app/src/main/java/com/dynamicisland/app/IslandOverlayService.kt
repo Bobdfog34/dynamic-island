@@ -11,8 +11,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -55,13 +55,15 @@ class IslandOverlayService : Service(), IslandView.Listener {
         override fun run() {
             val left = timerEnd - System.currentTimeMillis()
             if (left <= 0) {
-                showContent(IslandContent(IslandContent.Type.TIMER, "Таймер завершён", "0:00", emoji = "⏱"))
+                islandView.show(
+                    IslandContent(IslandContent.Type.TIMER, "Таймер завершён", "0:00", emoji = "⏰")
+                )
                 handler.postDelayed({ restoreDefault() }, 4000)
             } else {
                 val sec = (left / 1000).toInt()
                 val m = sec / 60
                 val s = sec % 60
-                showContent(
+                islandView.show(
                     IslandContent(
                         IslandContent.Type.TIMER,
                         "Таймер",
@@ -86,21 +88,23 @@ class IslandOverlayService : Service(), IslandView.Listener {
                             status == BatteryManager.BATTERY_STATUS_FULL
                     lastBatteryLevel = pct
                     if (prefs.showCharging && charging && !lastCharging) {
-                        showContent(
+                        islandView.show(
                             IslandContent(
                                 IslandContent.Type.CHARGING,
                                 "Зарядка",
                                 "$pct%",
-                                emoji = "⚡"
+                                emoji = "⚡",
+                                progress = pct
                             )
                         )
                     } else if (prefs.showBattery && !charging && pct in 1..15) {
-                        showContent(
+                        islandView.show(
                             IslandContent(
                                 IslandContent.Type.BATTERY_LOW,
                                 "Низкий заряд",
                                 "$pct%",
-                                emoji = "🔋"
+                                emoji = "🔋",
+                                progress = pct
                             )
                         )
                     }
@@ -108,12 +112,13 @@ class IslandOverlayService : Service(), IslandView.Listener {
                 }
                 Intent.ACTION_POWER_CONNECTED -> {
                     if (prefs.showCharging) {
-                        showContent(
+                        islandView.show(
                             IslandContent(
                                 IslandContent.Type.CHARGING,
                                 "Зарядка",
                                 "$lastBatteryLevel%",
-                                emoji = "⚡"
+                                emoji = "⚡",
+                                progress = lastBatteryLevel
                             )
                         )
                     }
@@ -239,35 +244,40 @@ class IslandOverlayService : Service(), IslandView.Listener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             NotificationListener.ACTION_FORWARD -> {
-                if (!prefs.showNotifications) return START_STICKY
                 val title = intent.getStringExtra("title") ?: return START_STICKY
                 val text = intent.getStringExtra("text") ?: ""
                 val pkg = intent.getStringExtra("pkg") ?: ""
-                var icon: android.graphics.drawable.Drawable? = null
-                if (pkg.isNotEmpty()) {
-                    try {
-                        icon = packageManager.getApplicationIcon(pkg)
-                    } catch (_: Exception) {
-                    }
-                }
-                showContent(
-                    IslandContent(
-                        IslandContent.Type.NOTIFICATION,
-                        title,
-                        text,
-                        icon = icon,
-                        emoji = "🔔"
-                    )
-                )
+                onNotificationReceived(title, text, pkg)
             }
-            "ACTION_START_TIMER" -> {
-                val minutes = intent.getIntExtra("minutes", 1)
-                startTimer(minutes)
-            }
+            "ACTION_START_TIMER" -> startTimer(intent.getIntExtra("minutes", 1))
             "ACTION_STOP_TIMER" -> stopTimer()
             "ACTION_CLEAR" -> islandView.clear()
         }
         return START_STICKY
+    }
+
+    fun onNotificationReceived(title: String, text: String, pkg: String) {
+        if (!prefs.showNotifications) return
+        if (title.isBlank()) return
+        var icon: Drawable? = null
+        if (pkg.isNotEmpty()) {
+            try {
+                icon = packageManager.getApplicationIcon(pkg)
+            } catch (_: Exception) {
+            }
+        }
+        val content = IslandContent(
+            IslandContent.Type.NOTIFICATION,
+            title,
+            text,
+            icon = icon,
+            emoji = if (icon == null) "🔔" else ""
+        )
+        handler.post { islandView.show(content) }
+    }
+
+    fun onListenerReady() {
+        if (prefs.showMusic) startMusicListener()
     }
 
     private fun startTimer(minutes: Int) {
@@ -281,15 +291,12 @@ class IslandOverlayService : Service(), IslandView.Listener {
         restoreDefault()
     }
 
-    fun showContent(content: IslandContent) {
-        if (content.type == IslandContent.Type.MUSIC) lastMusic = content
-        handler.post { islandView.showContent(content) }
-    }
-
     private fun restoreDefault() {
         val music = lastMusic
-        if (prefs.showMusic && music != null && activeController?.playbackState?.state == PlaybackState.STATE_PLAYING) {
-            handler.post { islandView.showContent(music) }
+        if (prefs.showMusic && music != null &&
+            activeController?.playbackState?.state == PlaybackState.STATE_PLAYING
+        ) {
+            handler.post { islandView.show(music) }
         } else {
             handler.post { islandView.clear() }
         }
@@ -297,7 +304,10 @@ class IslandOverlayService : Service(), IslandView.Listener {
 
     private fun startMusicListener() {
         try {
-            mediaSessionManager = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+            if (mediaSessionManager == null) {
+                mediaSessionManager =
+                    getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
+            }
             val component = ComponentName(this, NotificationListener::class.java)
             mediaSessionManager?.addOnActiveSessionsChangedListener(sessionsChangedListener, component)
             bindController(mediaSessionManager?.getActiveSessions(component)?.firstOrNull())
@@ -337,12 +347,12 @@ class IslandOverlayService : Service(), IslandView.Listener {
         )
         lastMusic = content
         if (islandView.state() != IslandView.State.EXPANDED) {
-            handler.post { islandView.showContent(content) }
+            handler.post { islandView.show(content) }
         }
     }
 
-    override fun onToggled(expanded: Boolean) {
-        if (!expanded) restoreDefault()
+    override fun onIdle() {
+        restoreDefault()
     }
 
     override fun onMoved(dx: Int, dy: Int) {
@@ -369,12 +379,7 @@ class IslandOverlayService : Service(), IslandView.Listener {
         }
         try {
             activeController?.unregisterCallback(controllerCallback)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                mediaSessionManager?.removeOnActiveSessionsChangedListener(sessionsChangedListener)
-            } else {
-                @Suppress("DEPRECATION")
-                mediaSessionManager?.removeOnActiveSessionsChangedListener(sessionsChangedListener)
-            }
+            mediaSessionManager?.removeOnActiveSessionsChangedListener(sessionsChangedListener)
         } catch (_: Exception) {
         }
         try {

@@ -66,4 +66,8 @@ class Prefs(context: Context) {
     var borderEnabled: Boolean
         get() = sp.getBoolean("border_enabled", true)
         set(v) = sp.edit().putBoolean("border_enabled", v).apply()
+
+    var glowEnabled: Boolean
+        get() = sp.getBoolean("glow_enabled", true)
+        set(v) = sp.edit().putBoolean("glow_enabled", v).apply()
 }
