@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Dynamic Island</string>
+    <string name="service_channel_name">Dynamic Island</string>
+    <string name="service_channel_desc">Keeps the Dynamic Island overlay running</string>
+    <string name="service_title">Dynamic Island is active</string>
+    <string name="service_text">Tap to open settings</string>
+    <string name="accessibility_desc">Dynamic Island overlay</string>
+</resources>
