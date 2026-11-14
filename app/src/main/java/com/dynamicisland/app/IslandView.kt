@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
@@ -14,12 +15,15 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewOutlineProvider
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -31,6 +35,13 @@ class IslandView(context: Context) : FrameLayout(context) {
         fun onMoved(dx: Int, dy: Int)
         fun onLongPress()
         fun onIdle()
+        fun onMediaAction(action: Int)
+    }
+
+    companion object {
+        const val MEDIA_PREV = 0
+        const val MEDIA_PLAY_PAUSE = 1
+        const val MEDIA_NEXT = 2
     }
 
     var listener: Listener? = null
@@ -43,17 +54,31 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun dp(v: Int) = (v * density).toInt()
     private fun dpf(v: Float) = v * density
 
-    private val pill = LinearLayout(context)
+    private val pill = FrameLayout(context)
+    private val sheen = View(context)
+    private val contentRow = LinearLayout(context)
+
+    private val idleDot = View(context)
+
     private val leftContainer = FrameLayout(context)
     private val leftIcon = ImageView(context)
     private val emojiBadge = TextView(context)
+    private val albumArt = ImageView(context)
+
+    private val textBox = LinearLayout(context)
+    private val titleView = TextView(context)
+    private val subtitleView = TextView(context)
+    private val progressLine = ProgressLineView(context)
+
     private val rightContainer = FrameLayout(context)
     private val equalizer = EqualizerView(context)
     private val battery = BatteryView(context)
-    private val titleView = TextView(context)
-    private val subtitleView = TextView(context)
-    private val textBox = LinearLayout(context)
-    private val idleDot = View(context)
+
+    private val controls = LinearLayout(context)
+    private val prevBtn = ImageButton(context)
+    private val playBtn = ImageButton(context)
+    private val nextBtn = ImageButton(context)
+
     private val background = GradientDrawable()
 
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -75,28 +100,54 @@ class IslandView(context: Context) : FrameLayout(context) {
     private val collapseRunnable = Runnable { finishTransient() }
 
     init {
-        setPadding(dp(14), dp(14), dp(14), dp(14))
+        setPadding(dp(16), dp(16), dp(16), dp(16))
         setWillNotDraw(false)
 
         background.shape = GradientDrawable.RECTANGLE
         background.orientation = GradientDrawable.Orientation.TOP_BOTTOM
         background.setStroke(dp(1), Color.parseColor("#33FFFFFF"))
 
-        pill.orientation = LinearLayout.HORIZONTAL
-        pill.gravity = Gravity.CENTER_VERTICAL
-        pill.background = background
-        pill.setPadding(dp(8), dp(6), dp(12), dp(6))
         pill.clipToOutline = true
+        pill.background = background
 
-        leftContainer.layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
-        leftIcon.layoutParams = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
+        sheen.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        sheen.background = ContextCompat.getDrawable(context, R.drawable.island_sheen)
+        pill.addView(sheen)
+
+        contentRow.orientation = LinearLayout.HORIZONTAL
+        contentRow.gravity = Gravity.CENTER
+        contentRow.setPadding(dp(8), dp(6), dp(8), dp(6))
+        contentRow.layoutParams = LayoutParams(
+            LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT
+        )
+        pill.addView(contentRow)
+
+        idleDot.layoutParams = LinearLayout.LayoutParams(dp(9), dp(9))
+        idleDot.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.parseColor("#4D5A5A66"))
+        }
+        contentRow.addView(idleDot)
+
+        leftContainer.layoutParams = LinearLayout.LayoutParams(dp(32), dp(32))
+        leftIcon.layoutParams = FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         leftIcon.scaleType = ImageView.ScaleType.FIT_CENTER
-        emojiBadge.layoutParams = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
+        emojiBadge.layoutParams = FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         emojiBadge.gravity = Gravity.CENTER
-        emojiBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        emojiBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         emojiBadge.setTextColor(Color.WHITE)
+        albumArt.layoutParams = FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER)
+        albumArt.scaleType = ImageView.ScaleType.CENTER_CROP
+        albumArt.clipToOutline = true
+        albumArt.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, dpf(9f))
+            }
+        }
+        leftContainer.addView(albumArt)
         leftContainer.addView(leftIcon)
         leftContainer.addView(emojiBadge)
+        contentRow.addView(leftContainer)
 
         titleView.setTextColor(Color.WHITE)
         titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
@@ -109,31 +160,39 @@ class IslandView(context: Context) : FrameLayout(context) {
         subtitleView.ellipsize = android.text.TextUtils.TruncateAt.END
 
         textBox.orientation = LinearLayout.VERTICAL
-        textBox.setPadding(dp(9), 0, dp(9), 0)
+        textBox.gravity = Gravity.CENTER_VERTICAL
+        textBox.setPadding(dp(10), 0, dp(10), 0)
         textBox.addView(titleView)
         textBox.addView(subtitleView)
+        val progLp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(4)
+        )
+        progLp.topMargin = dp(6)
+        progressLine.layoutParams = progLp
+        progressLine.visibility = View.GONE
+        textBox.addView(progressLine)
         textBox.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        contentRow.addView(textBox)
 
-        rightContainer.layoutParams = LinearLayout.LayoutParams(dp(34), dp(20))
-        equalizer.layoutParams = FrameLayout.LayoutParams(dp(26), dp(16), Gravity.CENTER)
-        battery.layoutParams = FrameLayout.LayoutParams(dp(30), dp(15), Gravity.CENTER)
+        rightContainer.layoutParams = LinearLayout.LayoutParams(dp(34), dp(22))
+        equalizer.layoutParams = FrameLayout.LayoutParams(dp(28), dp(18), Gravity.CENTER)
+        battery.layoutParams = FrameLayout.LayoutParams(dp(32), dp(16), Gravity.CENTER)
         rightContainer.addView(equalizer)
         rightContainer.addView(battery)
+        contentRow.addView(rightContainer)
 
-        idleDot.layoutParams = LinearLayout.LayoutParams(dp(7), dp(7))
-        idleDot.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.parseColor("#4D5A5A66"))
-        }
-
-        pill.addView(idleDot)
-        pill.addView(leftContainer)
-        pill.addView(textBox)
-        pill.addView(rightContainer)
-
-        val pillLp = FrameLayout.LayoutParams(
-            dp(prefs.collapsedWidth), dp(prefs.collapsedHeight), Gravity.CENTER
+        controls.orientation = LinearLayout.HORIZONTAL
+        controls.gravity = Gravity.CENTER
+        controls.visibility = View.GONE
+        controls.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
         )
+        controls.addView(mediaButton(prevBtn, R.drawable.ic_media_prev, MEDIA_PREV))
+        controls.addView(mediaButton(playBtn, R.drawable.ic_media_play, MEDIA_PLAY_PAUSE))
+        controls.addView(mediaButton(nextBtn, R.drawable.ic_media_next, MEDIA_NEXT))
+        contentRow.addView(controls)
+
+        val pillLp = LayoutParams(dp(prefs.collapsedWidth), dp(prefs.collapsedHeight), Gravity.CENTER)
         pill.layoutParams = pillLp
         addView(pill)
 
@@ -144,10 +203,22 @@ class IslandView(context: Context) : FrameLayout(context) {
         startBreathing()
     }
 
+    private fun mediaButton(btn: ImageButton, icon: Int, action: Int): ImageButton {
+        btn.setImageResource(icon)
+        btn.background = null
+        btn.setColorFilter(Color.WHITE)
+        btn.alpha = 0.92f
+        btn.layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+        btn.scaleType = ImageView.ScaleType.FIT_CENTER
+        btn.setPadding(dp(6), dp(6), dp(6), dp(6))
+        btn.setOnClickListener { listener?.onMediaAction(action) }
+        return btn
+    }
+
     fun applyAppearance() {
         val bg = prefs.bgColor
-        val top = blend(bg, Color.WHITE, 0.10f)
-        val bottom = blend(bg, Color.BLACK, 0.06f)
+        val top = blend(bg, Color.WHITE, 0.13f)
+        val bottom = blend(bg, Color.BLACK, 0.08f)
         background.orientation = GradientDrawable.Orientation.TOP_BOTTOM
         background.colors = intArrayOf(top, bottom)
         background.alpha = prefs.bgAlpha
@@ -157,7 +228,8 @@ class IslandView(context: Context) : FrameLayout(context) {
         } else {
             background.setStroke(0, Color.TRANSPARENT)
         }
-        val lp = pill.layoutParams as FrameLayout.LayoutParams
+        sheen.visibility = if (prefs.sheenEnabled) View.VISIBLE else View.GONE
+        val lp = pill.layoutParams as LayoutParams
         if (state == State.IDLE) {
             lp.width = dp(prefs.collapsedWidth)
             lp.height = dp(prefs.collapsedHeight)
@@ -169,7 +241,7 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun startBreathing() {
         breathAnimator?.cancel()
         breathAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 2600
+            duration = 2800
             repeatCount = ValueAnimator.INFINITE
             repeatMode = ValueAnimator.REVERSE
             addUpdateListener {
@@ -186,21 +258,21 @@ class IslandView(context: Context) : FrameLayout(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!prefs.glowEnabled) return
-        val accent = if (prefs.bgColor == Color.parseColor("#0A84FF")) Color.parseColor("#0A84FF")
-        else Color.parseColor("#0A84FF")
-        val pad = dpf(9f)
+        val accent = if (current?.type == IslandContent.Type.MUSIC) {
+            Color.parseColor("#BF5AF2")
+        } else {
+            Color.parseColor("#0A84FF")
+        }
+        val pad = dpf(10f)
         val r = (pill.height / 2f) + pad
-        glowRect.set(
-            pill.left - pad, pill.top - pad,
-            pill.right + pad, pill.bottom + pad
-        )
+        glowRect.set(pill.left - pad, pill.top - pad, pill.right + pad, pill.bottom + pad)
         glowPaint.style = Paint.Style.FILL
-        glowPaint.color = Color.argb(38, Color.red(accent), Color.green(accent), Color.blue(accent))
+        glowPaint.color = Color.argb(30, Color.red(accent), Color.green(accent), Color.blue(accent))
         canvas.drawRoundRect(glowRect, r, r, glowPaint)
-        val pad2 = dpf(4f)
+        val pad2 = dpf(5f)
         val r2 = (pill.height / 2f) + pad2
         glowRect.set(pill.left - pad2, pill.top - pad2, pill.right + pad2, pill.bottom + pad2)
-        glowPaint.color = Color.argb(50, Color.red(accent), Color.green(accent), Color.blue(accent))
+        glowPaint.color = Color.argb(44, Color.red(accent), Color.green(accent), Color.blue(accent))
         canvas.drawRoundRect(glowRect, r2, r2, glowPaint)
     }
 
@@ -249,6 +321,14 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     fun state(): State = state
 
+    fun currentType(): IslandContent.Type? = current?.type
+
+    fun refresh(content: IslandContent) {
+        current = content
+        updateContentOnly(content)
+        applyRightWidget(content)
+    }
+
     fun toggle() {
         if (state == State.EXPANDED) finishTransient() else expand()
     }
@@ -281,6 +361,7 @@ class IslandView(context: Context) : FrameLayout(context) {
         applyContent(content)
         if (state == State.EXPANDED) {
             updateContentOnly(content)
+            setState(State.EXPANDED)
         } else {
             setState(State.COMPACT)
         }
@@ -328,27 +409,55 @@ class IslandView(context: Context) : FrameLayout(context) {
     private fun updateContentOnly(content: IslandContent) {
         titleView.text = content.title
         subtitleView.text = content.subtitle
+        if (content.type == IslandContent.Type.MUSIC && prefs.showAppLabel && content.appLabel.isNotBlank()) {
+            subtitleView.text = if (content.subtitle.isBlank()) content.appLabel
+            else content.subtitle
+        } else if (content.type == IslandContent.Type.NOTIFICATION &&
+            prefs.showAppLabel && content.appLabel.isNotBlank() && content.subtitle.isBlank()
+        ) {
+            subtitleView.text = content.appLabel
+        }
         applyBadge(content)
+        if (content.type == IslandContent.Type.MUSIC) {
+            val f = content.progressFraction()
+            if (f >= 0f) progressLine.setFraction(f, animate = false)
+        }
+        playBtn.setImageResource(
+            if (content.isPlaying) R.drawable.ic_media_pause else R.drawable.ic_media_play
+        )
     }
 
     private fun applyContent(content: IslandContent) {
         updateContentOnly(content)
         applyRightWidget(content)
+        animateContentIn()
+    }
+
+    private fun animateContentIn() {
+        textBox.alpha = 0f
+        textBox.translationX = dpf(8f)
+        textBox.animate().alpha(1f).translationX(0f).setDuration(240).start()
     }
 
     private fun applyBadge(content: IslandContent) {
-        if (content.icon != null) {
-            leftIcon.setImageDrawable(content.icon)
-            leftIcon.visibility = View.VISIBLE
-            emojiBadge.visibility = View.GONE
-        } else if (content.emoji.isNotEmpty()) {
-            leftIcon.setImageDrawable(null)
-            leftIcon.visibility = View.GONE
-            emojiBadge.text = content.emoji
-            emojiBadge.visibility = View.VISIBLE
-        } else {
-            leftIcon.visibility = View.GONE
-            emojiBadge.visibility = View.GONE
+        albumArt.visibility = View.GONE
+        leftIcon.visibility = View.GONE
+        emojiBadge.visibility = View.GONE
+        emojiBadge.text = ""
+        leftIcon.setImageDrawable(null)
+        when {
+            content.type == IslandContent.Type.MUSIC && content.albumArt != null -> {
+                albumArt.setImageDrawable(content.albumArt)
+                albumArt.visibility = View.VISIBLE
+            }
+            content.icon != null -> {
+                leftIcon.setImageDrawable(content.icon)
+                leftIcon.visibility = View.VISIBLE
+            }
+            content.emoji.isNotEmpty() -> {
+                emojiBadge.text = content.emoji
+                emojiBadge.visibility = View.VISIBLE
+            }
         }
     }
 
@@ -378,12 +487,15 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun setState(newState: State) {
         state = newState
+        val type = current?.type
         when (newState) {
             State.IDLE -> {
                 idleDot.visibility = View.VISIBLE
                 leftContainer.visibility = View.GONE
                 textBox.visibility = View.GONE
                 rightContainer.visibility = View.GONE
+                controls.visibility = View.GONE
+                progressLine.visibility = View.GONE
                 equalizer.stopAnim()
                 battery.stopAnim()
                 animateTo(dp(prefs.collapsedWidth), dp(prefs.collapsedHeight), idle = true)
@@ -391,25 +503,41 @@ class IslandView(context: Context) : FrameLayout(context) {
             State.COMPACT -> {
                 idleDot.visibility = View.GONE
                 leftContainer.visibility =
-                    if (leftIcon.drawable != null || emojiBadge.text.isNotEmpty()) View.VISIBLE else View.GONE
+                    if (albumArt.visibility == View.VISIBLE || leftIcon.drawable != null ||
+                        emojiBadge.text.isNotEmpty()
+                    ) View.VISIBLE else View.GONE
                 textBox.visibility = View.VISIBLE
-                subtitleView.visibility = View.GONE
+                subtitleView.visibility = View.VISIBLE
+                controls.visibility = View.GONE
+                progressLine.visibility = View.GONE
                 rightContainer.visibility =
-                    if (equalizer.visibility == View.VISIBLE || battery.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-                val w = min((screenWidth - dp(48)), dp(240))
-                animateTo(w, dp(42), idle = false)
+                    if (type == IslandContent.Type.MUSIC || type == IslandContent.Type.CHARGING ||
+                        type == IslandContent.Type.BATTERY_LOW
+                    ) View.VISIBLE else View.GONE
+                val w = min((screenWidth - dp(48)), dp(272))
+                animateTo(w, dp(46), idle = false)
                 bounceContent()
             }
             State.EXPANDED -> {
                 idleDot.visibility = View.GONE
                 leftContainer.visibility =
-                    if (leftIcon.drawable != null || emojiBadge.text.isNotEmpty()) View.VISIBLE else View.GONE
+                    if (albumArt.visibility == View.VISIBLE || leftIcon.drawable != null ||
+                        emojiBadge.text.isNotEmpty()
+                    ) View.VISIBLE else View.GONE
                 textBox.visibility = View.VISIBLE
                 subtitleView.visibility = View.VISIBLE
+                val music = type == IslandContent.Type.MUSIC
+                controls.visibility = if (music) View.VISIBLE else View.GONE
+                progressLine.visibility =
+                    if (music && (current?.progressFraction() ?: -1f) >= 0f) View.VISIBLE else View.GONE
                 rightContainer.visibility =
-                    if (equalizer.visibility == View.VISIBLE || battery.visibility == View.VISIBLE) View.VISIBLE else View.GONE
-                val w = min((screenWidth - dp(24)), dp(384))
-                animateTo(w, dp(86), idle = false)
+                    if (music) View.GONE
+                    else if (type == IslandContent.Type.CHARGING ||
+                        type == IslandContent.Type.BATTERY_LOW
+                    ) View.VISIBLE else View.GONE
+                val w = min((screenWidth - dp(24)), dp(408))
+                val h = if (music) dp(104) else dp(92)
+                animateTo(w, h, idle = false)
                 subtitleView.alpha = 0f
                 subtitleView.animate().alpha(1f).setDuration(220).start()
             }
@@ -425,7 +553,7 @@ class IslandView(context: Context) : FrameLayout(context) {
 
     private fun animateTo(targetW: Int, targetH: Int, idle: Boolean) {
         sizeAnimator?.cancel()
-        val lp = pill.layoutParams as FrameLayout.LayoutParams
+        val lp = pill.layoutParams as LayoutParams
         val startW = if (lp.width > 0) lp.width else dp(prefs.collapsedWidth)
         val startH = if (lp.height > 0) lp.height else dp(prefs.collapsedHeight)
 
@@ -436,7 +564,7 @@ class IslandView(context: Context) : FrameLayout(context) {
                 val f = it.animatedFraction
                 val w = (startW + (targetW - startW) * f).toInt()
                 val h = (startH + (targetH - startH) * f).toInt()
-                val p = pill.layoutParams as FrameLayout.LayoutParams
+                val p = pill.layoutParams as LayoutParams
                 p.width = w
                 p.height = h
                 pill.layoutParams = p

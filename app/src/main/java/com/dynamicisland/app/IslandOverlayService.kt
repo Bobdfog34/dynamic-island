@@ -12,6 +12,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -76,6 +77,19 @@ class IslandOverlayService : Service(), IslandView.Listener {
         }
     }
 
+    private val progressTicker = object : Runnable {
+        override fun run() {
+            val c = activeController
+            if (prefs.showMusic && c != null &&
+                c.playbackState?.state == PlaybackState.STATE_PLAYING &&
+                islandView.currentType() == IslandContent.Type.MUSIC
+            ) {
+                buildMusicContent(c)?.let { islandView.refresh(it) }
+            }
+            handler.postDelayed(this, 1000)
+        }
+    }
+
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
@@ -137,11 +151,21 @@ class IslandOverlayService : Service(), IslandView.Listener {
     private var activeController: MediaController? = null
     private val controllerCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            updateMusic(activeController)
+            val c = activeController
+            val content = c?.let { buildMusicContent(it) }
+            lastMusic = content
+            if (content != null && prefs.showMusic && islandView.state() != IslandView.State.EXPANDED) {
+                islandView.show(content)
+            }
         }
 
         override fun onPlaybackStateChanged(state: PlaybackState?) {
-            updateMusic(activeController)
+            val c = activeController
+            val content = c?.let { buildMusicContent(it) }
+            lastMusic = content
+            if (content != null && prefs.showMusic && islandView.state() != IslandView.State.EXPANDED) {
+                islandView.show(content)
+            }
         }
     }
 
@@ -201,6 +225,7 @@ class IslandOverlayService : Service(), IslandView.Listener {
         )
 
         if (prefs.showMusic) startMusicListener()
+        handler.postDelayed(progressTicker, 1000)
     }
 
     private fun createChannel() {
@@ -247,7 +272,8 @@ class IslandOverlayService : Service(), IslandView.Listener {
                 val title = intent.getStringExtra("title") ?: return START_STICKY
                 val text = intent.getStringExtra("text") ?: ""
                 val pkg = intent.getStringExtra("pkg") ?: ""
-                onNotificationReceived(title, text, pkg)
+                val appLabel = intent.getStringExtra("appLabel") ?: ""
+                onNotificationReceived(title, text, pkg, appLabel)
             }
             "ACTION_START_TIMER" -> startTimer(intent.getIntExtra("minutes", 1))
             "ACTION_STOP_TIMER" -> stopTimer()
@@ -256,9 +282,9 @@ class IslandOverlayService : Service(), IslandView.Listener {
         return START_STICKY
     }
 
-    fun onNotificationReceived(title: String, text: String, pkg: String) {
+    fun onNotificationReceived(title: String, text: String, pkg: String, appLabel: String = "") {
         if (!prefs.showNotifications) return
-        if (title.isBlank()) return
+        if (title.isBlank() && text.isBlank()) return
         var icon: Drawable? = null
         if (pkg.isNotEmpty()) {
             try {
@@ -268,10 +294,11 @@ class IslandOverlayService : Service(), IslandView.Listener {
         }
         val content = IslandContent(
             IslandContent.Type.NOTIFICATION,
-            title,
+            title.ifBlank { appLabel },
             text,
             icon = icon,
-            emoji = if (icon == null) "🔔" else ""
+            emoji = if (icon == null) "🔔" else "",
+            appLabel = appLabel
         )
         handler.post { islandView.show(content) }
     }
@@ -318,37 +345,55 @@ class IslandOverlayService : Service(), IslandView.Listener {
 
     private fun bindController(controller: MediaController?) {
         if (activeController === controller) {
-            updateMusic(controller)
             return
         }
         activeController?.unregisterCallback(controllerCallback)
         activeController = controller
         controller?.registerCallback(controllerCallback)
-        updateMusic(controller)
+        val content = controller?.let { buildMusicContent(it) }
+        lastMusic = content
+        if (content != null && prefs.showMusic && islandView.state() != IslandView.State.EXPANDED) {
+            handler.post { islandView.show(content) }
+        } else if (controller == null && prefs.showMusic &&
+            islandView.state() != IslandView.State.EXPANDED
+        ) {
+            islandView.clear()
+        }
     }
 
-    private fun updateMusic(controller: MediaController?) {
-        if (!prefs.showMusic) return
-        if (controller == null) {
-            lastMusic = null
-            if (islandView.state() != IslandView.State.EXPANDED) islandView.clear()
-            return
-        }
-        val metadata = controller.metadata ?: return
-        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return
+    private fun buildMusicContent(controller: MediaController): IslandContent? {
+        val metadata = controller.metadata ?: return null
+        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE) ?: return null
         val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: ""
         val playing = controller.playbackState?.state == PlaybackState.STATE_PLAYING
-        val content = IslandContent(
+        val position = controller.playbackState?.position ?: 0L
+        val duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
+        val art: Drawable? = try {
+            val bmp = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+                ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            bmp?.let { BitmapDrawable(resources, it) }
+        } catch (_: Exception) {
+            null
+        }
+        val appLabel = try {
+            val ai = packageManager.getApplicationInfo(controller.packageName, 0)
+            packageManager.getApplicationLabel(ai).toString()
+        } catch (_: Exception) {
+            ""
+        }
+        return IslandContent(
             IslandContent.Type.MUSIC,
             title,
             artist,
-            emoji = if (playing) "🎵" else "⏸"
+            emoji = if (playing) "🎵" else "⏸",
+            appLabel = appLabel,
+            albumArt = art,
+            isPlaying = playing,
+            positionMs = position,
+            durationMs = duration
         )
-        lastMusic = content
-        if (islandView.state() != IslandView.State.EXPANDED) {
-            handler.post { islandView.show(content) }
-        }
     }
 
     override fun onIdle() {
@@ -368,6 +413,25 @@ class IslandOverlayService : Service(), IslandView.Listener {
         val intent = Intent(this, MainActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    override fun onMediaAction(action: Int) {
+        val controller = activeController ?: return
+        val tc = controller.transportControls
+        try {
+            when (action) {
+                IslandView.MEDIA_PREV -> tc.skipToPrevious()
+                IslandView.MEDIA_PLAY_PAUSE -> {
+                    if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                        tc.pause()
+                    } else {
+                        tc.play()
+                    }
+                }
+                IslandView.MEDIA_NEXT -> tc.skipToNext()
+            }
+        } catch (_: Exception) {
+        }
     }
 
     override fun onDestroy() {

@@ -9,9 +9,19 @@ data class IslandContent(
     val emoji: String = "",
     val icon: Drawable? = null,
     val progress: Int = -1,
+    val appLabel: String = "",
+    val albumArt: Drawable? = null,
+    val isPlaying: Boolean = false,
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()
 ) {
     enum class Type {
         IDLE, NOTIFICATION, MUSIC, CHARGING, BATTERY_LOW, TIMER, CALL
+    }
+
+    fun progressFraction(): Float {
+        if (durationMs <= 0L) return -1f
+        return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
     }
 }

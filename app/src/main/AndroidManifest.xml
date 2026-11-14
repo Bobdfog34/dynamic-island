@@ -29,6 +29,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".AppListActivity"
+            android:exported="false"
+            android:label="Приложения" />
+
         <service
             android:name=".IslandOverlayService"
             android:exported="false"

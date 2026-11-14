@@ -5,7 +5,22 @@ import android.graphics.Color
 
 class Prefs(context: Context) {
 
-    private val sp = context.getSharedPreferences("dynamic_island_prefs", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val sp = appContext.getSharedPreferences("dynamic_island_prefs", Context.MODE_PRIVATE)
+
+    companion object {
+        private val DEFAULT_PROTECTED = setOf(
+            "android",
+            "com.android.systemui",
+            "com.android.dialer",
+            "com.android.phone",
+            "com.google.android.dialer",
+            "com.android.server.telecom"
+        )
+
+        fun defaultProtected(context: Context): Set<String> =
+            DEFAULT_PROTECTED + context.packageName
+    }
 
     var showNotifications: Boolean
         get() = sp.getBoolean("show_notifications", true)
@@ -56,7 +71,7 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putInt("bg_alpha", v).apply()
 
     var animDuration: Int
-        get() = sp.getInt("anim_duration", 320)
+        get() = sp.getInt("anim_duration", 340)
         set(v) = sp.edit().putInt("anim_duration", v).apply()
 
     var autoCollapseMs: Int
@@ -70,4 +85,30 @@ class Prefs(context: Context) {
     var glowEnabled: Boolean
         get() = sp.getBoolean("glow_enabled", true)
         set(v) = sp.edit().putBoolean("glow_enabled", v).apply()
+
+    var sheenEnabled: Boolean
+        get() = sp.getBoolean("sheen_enabled", true)
+        set(v) = sp.edit().putBoolean("sheen_enabled", v).apply()
+
+    var showAppLabel: Boolean
+        get() = sp.getBoolean("show_app_label", true)
+        set(v) = sp.edit().putBoolean("show_app_label", v).apply()
+
+    // ---- Notification blocking ----
+
+    var blockSystemNotifications: Boolean
+        get() = sp.getBoolean("block_system_notifications", false)
+        set(v) = sp.edit().putBoolean("block_system_notifications", v).apply()
+
+    var protectedPackages: Set<String>
+        get() = sp.getStringSet("protected_packages", null) ?: defaultProtected(appContext)
+        set(v) = sp.edit().putStringSet("protected_packages", v).apply()
+
+    fun isProtected(pkg: String): Boolean = protectedPackages.contains(pkg)
+
+    fun setProtected(pkg: String, protect: Boolean) {
+        val cur = protectedPackages.toMutableSet()
+        if (protect) cur.add(pkg) else cur.remove(pkg)
+        protectedPackages = cur
+    }
 }

@@ -27,37 +27,67 @@ class NotificationListener : NotificationListenerService() {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
         val prefs = Prefs(this)
-        if (!prefs.showNotifications) return
         if (sbn.packageName == packageName) return
-        if (sbn.isOngoing) return
 
         val notification = sbn.notification ?: return
         val flags = notification.flags
-        if (flags and Notification.FLAG_GROUP_SUMMARY != 0) return
-        if (flags and Notification.FLAG_ONGOING_EVENT != 0) return
+        val ongoing = sbn.isOngoing ||
+                (flags and Notification.FLAG_GROUP_SUMMARY != 0) ||
+                (flags and Notification.FLAG_ONGOING_EVENT != 0)
+        val clearable = sbn.isClearable
 
         val extras = notification.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
-            ?: return
-        if (title.isBlank()) return
-
+            ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
-            ?: extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)?.firstOrNull()?.toString()
             ?: ""
+        val lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+            ?.mapNotNull { it?.toString() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+        val hasContent = title.isNotBlank() || text.isNotBlank() || lines.isNotEmpty()
+
+        // Block the system notification so it only appears in the island.
+        val block = prefs.blockSystemNotifications &&
+                prefs.showNotifications &&
+                !prefs.isProtected(sbn.packageName) &&
+                !ongoing && clearable && hasContent
+        if (block) {
+            try {
+                cancelNotification(sbn.key)
+            } catch (_: Exception) {
+            }
+        }
+
+        if (!prefs.showNotifications) return
+        if (ongoing) return
+        if (!hasContent) return
+
+        val finalTitle = title.ifBlank { lines.firstOrNull() ?: "" }
+        val finalText = text.ifBlank { lines.drop(1).firstOrNull() ?: "" }
+        val appLabel = try {
+            val ai = packageManager.getApplicationInfo(sbn.packageName, 0)
+            packageManager.getApplicationLabel(ai).toString()
+        } catch (_: Exception) {
+            ""
+        }
 
         val service = IslandBus.service
         if (service != null) {
-            service.onNotificationReceived(title, text, sbn.packageName)
+            service.onNotificationReceived(finalTitle, finalText, sbn.packageName, appLabel)
         } else {
             val intent = Intent(this, IslandOverlayService::class.java).apply {
                 action = ACTION_FORWARD
-                putExtra("title", title)
-                putExtra("text", text)
+                putExtra("title", finalTitle)
+                putExtra("text", finalText)
                 putExtra("pkg", sbn.packageName)
+                putExtra("appLabel", appLabel)
+                putStringArrayListExtra("lines", ArrayList(lines))
             }
             try {
                 startService(intent)

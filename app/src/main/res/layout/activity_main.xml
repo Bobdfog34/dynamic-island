@@ -170,6 +170,37 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
+            android:text="БЛОКИРОВКА УВЕДОМЛЕНИЙ"
+            android:textColor="#0A84FF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swBlock"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="Уведомления только в остров"
+            android:textColor="#FFFFFF" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Скрывает уведомления из панели — они появляются только в острове. Системные и важные уведомления не затрагиваются."
+            android:textColor="#88FFFFFF"
+            android:textSize="11sp" />
+
+        <Button
+            android:id="@+id/btnApps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Приложения-исключения" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
             android:text="ВНЕШНИЙ ВИД"
             android:textColor="#0A84FF"
             android:textSize="12sp"
@@ -287,6 +318,22 @@
             android:layout_height="wrap_content"
             android:paddingVertical="8dp"
             android:text="Свечение (glow)"
+            android:textColor="#FFFFFF" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swSheen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="Стеклянный блик (sheen)"
+            android:textColor="#FFFFFF" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swAppLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="Показывать имя приложения"
             android:textColor="#FFFFFF" />
 
         <TextView

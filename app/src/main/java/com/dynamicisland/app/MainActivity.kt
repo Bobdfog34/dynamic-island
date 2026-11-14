@@ -28,13 +28,12 @@ class MainActivity : AppCompatActivity() {
         private const val VIDEO_URL =
             "https://github.com/Bobdfog34/dynamic-island/releases/latest/download/instruction.mp4"
         private const val CHANGELOG =
-            "Что нового в 2.0:\n" +
-                    "• Уведомления показываются надёжно — с иконкой приложения и текстом\n" +
-                    "• Полностью новый дизайн: градиент, свечение, «дышащий» остров\n" +
-                    "• Живой эквалайзер для музыки и анимация зарядки\n" +
-                    "• Плавные пружинные анимации раскрытия\n" +
-                    "• Обновление прямо из приложения\n" +
-                    "• Видео-инструкция"
+            "Что нового в 3.0:\n" +
+                    "• Блокировка уведомлений: они приходят только в остров\n" +
+                    "• Список приложений-исключений (важные не блокируются)\n" +
+                    "• Музыка: обложка, прогресс и кнопки управления\n" +
+                    "• Стеклянный «sheen», мягкие анимации и подсветка\n" +
+                    "• Имя приложения в уведомлениях"
     }
 
     private lateinit var prefs: Prefs
@@ -42,6 +41,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var swEnable: SwitchCompat
+    private lateinit var swBlock: SwitchCompat
     private lateinit var tvVersion: TextView
     private lateinit var tvUpdateStatus: TextView
     private lateinit var tvChangelog: TextView
@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         swEnable = findViewById(R.id.swEnable)
+        swBlock = findViewById(R.id.swBlock)
         tvVersion = findViewById(R.id.tvVersion)
         tvUpdateStatus = findViewById(R.id.tvUpdateStatus)
         tvChangelog = findViewById(R.id.tvChangelog)
@@ -80,6 +81,26 @@ class MainActivity : AppCompatActivity() {
             if (checked) startIsland() else stopIsland()
         }
 
+        swBlock.setOnCheckedChangeListener { _, checked ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            if (checked && !hasNotificationAccess()) {
+                toast("Сначала дай доступ к уведомлениям (кнопка выше)")
+                updatingUi = true
+                swBlock.isChecked = false
+                updatingUi = false
+                return@setOnCheckedChangeListener
+            }
+            prefs.blockSystemNotifications = checked
+            toast(
+                if (checked) "Теперь уведомления приходят только в остров"
+                else "Блокировка уведомлений выключена"
+            )
+        }
+
+        findViewById<Button>(R.id.btnApps).setOnClickListener {
+            startActivity(Intent(this, AppListActivity::class.java))
+        }
+
         bindSwitch(R.id.swNotifications) { prefs.showNotifications = it }
         bindSwitch(R.id.swMusic) { prefs.showMusic = it }
         bindSwitch(R.id.swBattery) { prefs.showBattery = it }
@@ -87,6 +108,8 @@ class MainActivity : AppCompatActivity() {
         bindSwitch(R.id.swBoot) { prefs.startOnBoot = it }
         bindSwitch(R.id.swBorder) { prefs.borderEnabled = it; applyNow() }
         bindSwitch(R.id.swGlow) { prefs.glowEnabled = it; applyNow() }
+        bindSwitch(R.id.swSheen) { prefs.sheenEnabled = it; applyNow() }
+        bindSwitch(R.id.swAppLabel) { prefs.showAppLabel = it }
 
         setupSeek(
             R.id.sbWidth, R.id.tvWidth, prefs.collapsedWidth, 80, 220, "Ширина: %d dp"
@@ -153,6 +176,9 @@ class MainActivity : AppCompatActivity() {
             "?"
         }
     }
+
+    private fun hasNotificationAccess(): Boolean =
+        NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
 
     private fun checkUpdates() {
         tvUpdateStatus.text = "Проверка обновлений…"
@@ -244,6 +270,8 @@ class MainActivity : AppCompatActivity() {
             R.id.swBoot -> prefs.startOnBoot
             R.id.swBorder -> prefs.borderEnabled
             R.id.swGlow -> prefs.glowEnabled
+            R.id.swSheen -> prefs.sheenEnabled
+            R.id.swAppLabel -> prefs.showAppLabel
             else -> false
         }
         sw.setOnCheckedChangeListener { _, checked -> onChange(checked) }
@@ -252,6 +280,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadUiFromPrefs() {
         updatingUi = true
         swEnable.isChecked = IslandBus.service != null
+        swBlock.isChecked = prefs.blockSystemNotifications
         updatingUi = false
     }
 
@@ -304,8 +333,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateStatus() {
         val overlay = Settings.canDrawOverlays(this)
-        val notif = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        val notif = hasNotificationAccess()
         val running = IslandBus.service != null
+        val blocking = prefs.blockSystemNotifications
         tvStatus.text = buildString {
             append("Поверх окон: ")
             append(if (overlay) "✅" else "❌")
@@ -313,6 +343,8 @@ class MainActivity : AppCompatActivity() {
             append(if (notif) "✅" else "❌")
             append("\nСервис острова: ")
             append(if (running) "работает ✅" else "остановлен ⏹")
+            append("\nБлокировка уведомлений: ")
+            append(if (blocking) "включена 🔕" else "выключена")
         }
     }
 
@@ -375,6 +407,7 @@ class MainActivity : AppCompatActivity() {
             putExtra("title", "Сообщение")
             putExtra("text", "Привет! Это тестовое уведомление в острове 🎉")
             putExtra("pkg", "com.android.systemui")
+            putExtra("appLabel", "Сообщения")
         }
         ContextCompat.startForegroundService(this, intent)
     }
