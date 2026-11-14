@@ -77,9 +77,13 @@ class NotificationListener : NotificationListenerService() {
             ""
         }
 
+        val contentIntent = notification.contentIntent
+
         val service = IslandBus.service
         if (service != null) {
-            service.onNotificationReceived(finalTitle, finalText, sbn.packageName, appLabel, sbn.key)
+            service.onNotificationReceived(
+                finalTitle, finalText, sbn.packageName, appLabel, sbn.key, contentIntent
+            )
         } else {
             val intent = Intent(this, IslandOverlayService::class.java).apply {
                 action = ACTION_FORWARD
@@ -88,6 +92,7 @@ class NotificationListener : NotificationListenerService() {
                 putExtra("pkg", sbn.packageName)
                 putExtra("appLabel", appLabel)
                 putExtra("key", sbn.key)
+                putExtra("contentIntent", contentIntent)
                 putStringArrayListExtra("lines", ArrayList(lines))
             }
             try {

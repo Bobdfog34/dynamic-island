@@ -303,6 +303,13 @@
                 android:text="Серый" />
         </LinearLayout>
 
+        <Button
+            android:id="@+id/btnIphone"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Стиль iPhone (сбросить к оригиналу)" />
+
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/swBorder"
             android:layout_width="match_parent"
@@ -384,7 +391,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:layout_marginBottom="24dp"
-            android:text="Совет: потяни остров пальцем, чтобы переместить. Тапни — развернуть, двойной тап — открыть настройки."
+            android:text="Как на iPhone: тап — открыть приложение, удержание — развернуть/свернуть, потяни — переместить."
             android:textColor="#66FFFFFF"
             android:textSize="11sp" />
     </LinearLayout>

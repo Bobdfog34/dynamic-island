@@ -55,18 +55,28 @@ class IslandOverlayService : Service(), IslandView.Listener {
         val pkg: String,
         var appLabel: String,
         var icon: Drawable?,
-        val lines: LinkedHashMap<String, String>
+        val lines: LinkedHashMap<String, String>,
+        var pendingIntent: PendingIntent? = null
     )
 
     private val aggregates = LinkedHashMap<String, Agg>()
 
+    private var currentAppPackage: String = ""
+    private var currentPendingIntent: PendingIntent? = null
+
     private var timerEnd = 0L
+    private var timerTotal = 0L
     private val timerRunnable = object : Runnable {
         override fun run() {
+            currentAppPackage = ""
+            currentPendingIntent = null
             val left = timerEnd - System.currentTimeMillis()
             if (left <= 0) {
                 islandView.show(
-                    IslandContent(IslandContent.Type.TIMER, "Таймер завершён", "0:00", emoji = "⏰")
+                    IslandContent(
+                        IslandContent.Type.TIMER, "Таймер", "0:00",
+                        emoji = "⏰", durationMs = timerTotal, positionMs = 0L
+                    )
                 )
                 handler.postDelayed({ restoreDefault() }, 4000)
             } else {
@@ -78,7 +88,9 @@ class IslandOverlayService : Service(), IslandView.Listener {
                         IslandContent.Type.TIMER,
                         "Таймер",
                         String.format("%d:%02d", m, s),
-                        emoji = "⏱"
+                        emoji = "⏱",
+                        durationMs = timerTotal,
+                        positionMs = left
                     )
                 )
                 handler.postDelayed(this, 1000)
@@ -283,7 +295,9 @@ class IslandOverlayService : Service(), IslandView.Listener {
                 val pkg = intent.getStringExtra("pkg") ?: ""
                 val appLabel = intent.getStringExtra("appLabel") ?: ""
                 val key = intent.getStringExtra("key") ?: ""
-                onNotificationReceived(title, text, pkg, appLabel, key)
+                @Suppress("DEPRECATION")
+                val contentIntent = intent.getParcelableExtra<PendingIntent>("contentIntent")
+                onNotificationReceived(title, text, pkg, appLabel, key, contentIntent)
             }
             "ACTION_START_TIMER" -> startTimer(intent.getIntExtra("minutes", 1))
             "ACTION_STOP_TIMER" -> stopTimer()
@@ -297,7 +311,8 @@ class IslandOverlayService : Service(), IslandView.Listener {
         text: String,
         pkg: String,
         appLabel: String = "",
-        key: String = ""
+        key: String = "",
+        contentIntent: PendingIntent? = null
     ) {
         if (!prefs.showNotifications) return
         if (title.isBlank() && text.isBlank()) return
@@ -315,6 +330,9 @@ class IslandOverlayService : Service(), IslandView.Listener {
         }
         if (appLabel.isNotBlank()) agg.appLabel = appLabel
         if (icon != null) agg.icon = icon
+        if (contentIntent != null) agg.pendingIntent = contentIntent
+        currentAppPackage = pkg
+        currentPendingIntent = agg.pendingIntent
 
         val line = when {
             title.isNotBlank() && text.isNotBlank() -> "$title: $text"
@@ -357,7 +375,8 @@ class IslandOverlayService : Service(), IslandView.Listener {
     }
 
     private fun startTimer(minutes: Int) {
-        timerEnd = System.currentTimeMillis() + minutes * 60_000L
+        timerTotal = minutes * 60_000L
+        timerEnd = System.currentTimeMillis() + timerTotal
         handler.removeCallbacks(timerRunnable)
         handler.post(timerRunnable)
     }
@@ -432,6 +451,8 @@ class IslandOverlayService : Service(), IslandView.Listener {
         } catch (_: Exception) {
             ""
         }
+        currentAppPackage = controller.packageName
+        currentPendingIntent = null
         return IslandContent(
             IslandContent.Type.MUSIC,
             title,
@@ -459,10 +480,41 @@ class IslandOverlayService : Service(), IslandView.Listener {
         }
     }
 
-    override fun onLongPress() {
+    override fun onExpandToggle() {
+        handler.post { islandView.toggle() }
+    }
+
+    override fun onTap() {
+        val pi = currentPendingIntent
+        if (pi != null) {
+            try {
+                pi.send()
+                return
+            } catch (_: Exception) {
+            }
+        }
+        val pkg = currentAppPackage
+        if (pkg.isNotEmpty()) {
+            val li = packageManager.getLaunchIntentForPackage(pkg)
+            if (li != null) {
+                li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    startActivity(li)
+                    return
+                } catch (_: Exception) {
+                }
+            }
+        }
+        openSettings()
+    }
+
+    private fun openSettings() {
         val intent = Intent(this, MainActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+        }
     }
 
     override fun onMediaAction(action: Int) {

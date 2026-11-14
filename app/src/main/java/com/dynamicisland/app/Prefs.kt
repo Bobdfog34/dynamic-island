@@ -43,19 +43,19 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putBoolean("start_on_boot", v).apply()
 
     var collapsedWidth: Int
-        get() = sp.getInt("collapsed_width", 112)
+        get() = sp.getInt("collapsed_width", 126)
         set(v) = sp.edit().putInt("collapsed_width", v).apply()
 
     var collapsedHeight: Int
-        get() = sp.getInt("collapsed_height", 34)
+        get() = sp.getInt("collapsed_height", 37)
         set(v) = sp.edit().putInt("collapsed_height", v).apply()
 
     var cornerRadius: Int
-        get() = sp.getInt("corner_radius", 24)
+        get() = sp.getInt("corner_radius", 30)
         set(v) = sp.edit().putInt("corner_radius", v).apply()
 
     var offsetY: Int
-        get() = sp.getInt("offset_y", 8)
+        get() = sp.getInt("offset_y", 6)
         set(v) = sp.edit().putInt("offset_y", v).apply()
 
     var offsetX: Int
@@ -79,15 +79,15 @@ class Prefs(context: Context) {
         set(v) = sp.edit().putInt("auto_collapse", v).apply()
 
     var borderEnabled: Boolean
-        get() = sp.getBoolean("border_enabled", true)
+        get() = sp.getBoolean("border_enabled", false)
         set(v) = sp.edit().putBoolean("border_enabled", v).apply()
 
     var glowEnabled: Boolean
-        get() = sp.getBoolean("glow_enabled", true)
+        get() = sp.getBoolean("glow_enabled", false)
         set(v) = sp.edit().putBoolean("glow_enabled", v).apply()
 
     var sheenEnabled: Boolean
-        get() = sp.getBoolean("sheen_enabled", true)
+        get() = sp.getBoolean("sheen_enabled", false)
         set(v) = sp.edit().putBoolean("sheen_enabled", v).apply()
 
     var showAppLabel: Boolean
@@ -110,5 +110,20 @@ class Prefs(context: Context) {
         val cur = protectedPackages.toMutableSet()
         if (protect) cur.add(pkg) else cur.remove(pkg)
         protectedPackages = cur
+    }
+
+    fun applyIphoneStyle() {
+        bgColor = Color.BLACK
+        bgAlpha = 255
+        borderEnabled = false
+        glowEnabled = false
+        sheenEnabled = false
+        cornerRadius = 30
+        collapsedWidth = 126
+        collapsedHeight = 37
+        offsetX = 0
+        offsetY = 6
+        animDuration = 360
+        autoCollapseMs = 4000
     }
 }

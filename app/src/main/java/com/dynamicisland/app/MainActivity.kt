@@ -134,6 +134,12 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnTimer1).setOnClickListener { startTimer(1) }
         findViewById<Button>(R.id.btnTimerStop).setOnClickListener { stopTimer() }
         findViewById<Button>(R.id.btnApply).setOnClickListener { applyNow(); toast("Настройки применены") }
+        findViewById<Button>(R.id.btnIphone).setOnClickListener {
+            prefs.applyIphoneStyle()
+            applyNow()
+            toast("Стиль iPhone применён")
+            recreate()
+        }
 
         findViewById<Button>(R.id.btnCheckUpdate).setOnClickListener { checkUpdates() }
         findViewById<Button>(R.id.btnVideo).setOnClickListener { openUrl(VIDEO_URL) }
